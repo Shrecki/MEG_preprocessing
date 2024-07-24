@@ -17,8 +17,10 @@ They are assumed to happen in a set order.
 
 def filtering_step(raw_path, overwrite):
     raw = mne.io.read_raw(raw_path, preload=True)
+    # For annotation purposes
+    raw.plot(block=True)
+    
     raw_filt = raw.copy().notch_filter([50, 100]).filter(1, 45)
-    #raw_filt.plot(block=True)
     # Save result
     raw_filt.save(get_filtered_fname(raw_path), overwrite=overwrite)
     # Clean memory
