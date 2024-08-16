@@ -3,7 +3,7 @@ import mne
 import numpy as np
 from pathlib import Path as Path
 from src.data.fname_conventions import *
-from src.data.coreg_atlas import put_atlas_to_subject_space, create_atlas_dict
+from src.data.coreg_atlas import put_atlas_to_subject_space, create_atlas_dict, correctAtlas
 from src.data.event_extractor import *
 from mne_connectivity.envelope import symmetric_orth
 
@@ -20,7 +20,7 @@ def filtering_step(raw_path, overwrite):
     # For annotation purposes
     raw.plot(block=True)
     
-    raw_filt = raw.copy().notch_filter([50, 100]).filter(1, 45)
+    raw_filt = raw.copy().notch_filter([50, 100]).filter(1,45,method="iir", iir_params=dict(order=5, ftype='butter', output='sos'))
     # Save result
     raw_filt.save(get_filtered_fname(raw_path), overwrite=overwrite)
     # Clean memory
@@ -93,6 +93,23 @@ def fwd_step(subjects_fif_dir, subjects_mri_dir, subject_name, raw_path, overwri
     del bem_sol
     del info
     
+def compute_rank(data):
+    return mne.compute_rank(data, tol_kind="relative",tol=1e-3)
+
+def compute_min_rank_signal_noise(signal_epochs, noise_epochs):
+    rank_data = compute_rank(signal_epochs)
+    rank_noise = compute_rank(noise_epochs)# mne.compute_rank(epochs_noise, tol_kind="relative", tol=1e-3)
+    
+    min_rank = np.min([rank_data['meg'],rank_noise['meg']])
+    rank = {'meg': min_rank}
+    return rank
+
+def compute_noise_and_signal_epochs(raw_file, retained_events, events):
+    epochs_noise = mne.Epochs(raw_file, events=retained_events, tmin=-15, tmax=-0.2, reject_by_annotation=False, baseline=(None,-0.2))
+    epochs_signal = mne.Epochs(raw_file, events=events, tmin=-0.2, tmax=1.7, reject_by_annotation=False, baseline=(-0.2, 0))
+    return epochs_signal, epochs_noise
+    
+    
 def compute_covariances_from_events_pauses(raw_file, events, downsample_factor):
     # To define the noisy segments, we have:
     # - Time before first event
@@ -102,18 +119,26 @@ def compute_covariances_from_events_pauses(raw_file, events, downsample_factor):
     # For the purpose of these computations, one should not reject epochs containing bad segments, as otherwise we run the risk
     # of rejecting the entire dataset.
     retained_events = events[np.hstack((np.array([0]), np.where(np.diff(events[:, 0]) > 15000/downsample_factor)[0] + 1)),:]
-    epochs_noise = mne.Epochs(raw_file, events=retained_events, tmin=-15, tmax=0, reject_by_annotation=False)
-    cov_noise = mne.compute_covariance(epochs_noise, method='ledoit_wolf')
+    
+    epochs_signal, epochs_noise = compute_noise_and_signal_epochs(raw_file, retained_events, events)
+    
+    #rank = compute_min_rank_signal_noise(epochs_signal, epochs_noise)
+    rank = "info"
+    cov_noise = mne.compute_covariance(epochs_noise, method='ledoit_wolf', rank=rank)
     noise_cov = mne.cov.prepare_noise_cov(cov_noise, raw_file.info)
     noise_cov.plot(raw_file.info)
     
-    epochs_signal = mne.Epochs(raw_file, events=events, tmin=-0.2, tmax=1.7, reject_by_annotation=False)
-    data_cov = mne.compute_covariance(epochs_signal, method='ledoit_wolf')
+    data_cov = mne.compute_covariance(epochs_signal, method='ledoit_wolf', rank=rank)
     data_cov.plot(raw_file.info)
+    
+    # Plot whitening to check performance of whitening (baseline should be strictly in [-1.96,1.96]!)
+    evoked = epochs_signal.average()
+    #noise_cov = mne.compute_covariance(noise, method='ledoit_wolf',rank="info")
+    evoked.plot_white(noise_cov, time_unit="s")
     
     del epochs_noise, epochs_signal
     
-    return data_cov, noise_cov
+    return data_cov, noise_cov, rank
 
 def annotate_from_ica_downsample_and_save(raw_path, downsample_freq, overwrite):
     raw_post_process_icaed = mne.io.read_raw(get_icaed_fname(raw_path), preload=True)
@@ -123,45 +148,51 @@ def annotate_from_ica_downsample_and_save(raw_path, downsample_freq, overwrite):
     raw_post_processed_meg.save(get_icaed_annotated_fname(raw_path), overwrite=overwrite)
     return raw_post_processed_meg, downsample_factor
 
-
-def perform_source_reconstruction(raw_path, subject_name, subjects_fif_dir, overwrite=True):
-    # Let's investigate now computation of covariance (noise and signal) in the data.
-    # Load the preprocessed data
-    #raw_path = os.path.join(subjects_fif_dir, subject_name, "nBack_tsss_mc.fif")
-    
-    
-    # Add task events as annotations
-    #raw_post_process_icaed.plot(block=True)
+def get_raw_and_covars(raw_path, overwrite):
     # Downsample to 250 Hz!
     downsample_freq= 250
     raw_post_processed_meg, downsample_factor = annotate_from_ica_downsample_and_save(raw_path, downsample_freq, overwrite)
     
-    # Apply bandpass filter
-    raw_post_processed_meg.filter(1,45,method="iir", iir_params=dict(order=5, ftype='butter', output='sos'))
-
     # Extract the events from the annotations, limited only to the task (ie: no bad annotation)
     # Plot for sanity check
     events_task, event_ids = get_events_from_annotated_raw(raw_post_processed_meg)
     #raw_post_processed_meg.plot(events=events_task, block=True)
     
     # Compute covariances
-    data_cov, noise_cov = compute_covariances_from_events_pauses(raw_post_processed_meg, events_task, downsample_factor)
+    data_cov, noise_cov, noise_rank = compute_covariances_from_events_pauses(raw_post_processed_meg, events_task, downsample_factor)
+    return raw_post_processed_meg, data_cov, noise_cov, noise_rank
+
+
+def perform_source_reconstruction(raw_path, subject_name, subjects_fif_dir, overwrite=True):
+    # Let's investigate now computation of covariance (noise and signal) in the data.
+    # Load the preprocessed data
+    #raw_path = os.path.join(subjects_fif_dir, subject_name, "nBack_tsss_mc.fif")
+    # Add task events as annotations
+    #raw_post_process_icaed.plot(block=True)
+    raw_post_processed_meg, data_cov, noise_cov, noise_rank = get_raw_and_covars(raw_path, overwrite)
     
     # Read forward model
     fwd = mne.read_forward_solution(get_fwd_sol_fname(raw_path))
     
     # Compute source rec result
-    filters = mne.beamformer.make_lcmv(raw_post_processed_meg.info, forward=fwd, data_cov=data_cov, noise_cov=noise_cov)
+    filters = mne.beamformer.make_lcmv(raw_post_processed_meg.info, forward=fwd, data_cov=data_cov, noise_cov=noise_cov, rank=noise_rank)
     stc = mne.beamformer.apply_lcmv_raw(raw_post_processed_meg, filters)
     del fwd, filters, data_cov, noise_cov, raw_post_processed_meg
     stc.save(get_src_rec_fname(subjects_fif_dir, subject_name), overwrite=overwrite)
     del stc
     
-def atlasing_step(subjects_mri_dir, subjects_fif_dir, subject_name, t1_ref, atlas_path):
+def atlas_coreg_step(subjects_mri_dir, subject_name, t1_ref, atlas_path, hcp_path):
     # Transform the atlas to subject space
-    put_atlas_to_subject_space(subject_name, subjects_mri_dir, t1_ref, atlas_path)
+    put_atlas_to_subject_space(subject_name, subjects_mri_dir, t1_ref, atlas_path, hcp_path)
+    
+def atlas_correct_step(subjects_mri_dir, subject_name):
+    # Correct the atlas to make it 38 PCC + precuneus (Anterior/posterior) + intraparietal sulci (left / right)
+    correctAtlas(subjects_mri_dir, subject_name)
+    
+def atlasing_step(subjects_mri_dir, subjects_fif_dir, subject_name, t1_ref, atlas_path):
     # Get list of regions
     atlas_dict = create_atlas_dict(subjects_mri_dir, subject_name, atlas_path)
+    
     # Extract subject's signal
     # Get subject stc
     stc = mne.read_source_estimate(get_src_rec_fname(subjects_fif_dir, subject_name))
@@ -180,7 +211,7 @@ def leakage_correction(subject_name, subjects_fif_dir):
     np.save(get_src_ortho_fname(subjects_fif_dir, subject_name), ortho_solution)
     
 
-def preprocess_fif(subject_name, subjects_fif_dir, subjects_mri_dir, atlas_t1_ref, atlas_thresholded, skip_steps, overwrite=False):
+def preprocess_fif(subject_name, subjects_fif_dir, subjects_mri_dir, atlas_t1_ref, atlas_thresholded, hcp_atlas_path, skip_steps, overwrite=False):
     # The steps:
     #   notch filter 50 / 100 Hz
     #   band pass filter [0.1 - 125 Hz]
@@ -196,9 +227,24 @@ def preprocess_fif(subject_name, subjects_fif_dir, subjects_mri_dir, atlas_t1_re
     
     raw_path = Path(subjects_fif_dir, subject_name, "nBack_tsss_mc.fif")
 
+    funs = [filtering_step, ica_step, source_setup_step, bem_mesh_step, manual_coreg_step, fwd_step, perform_source_reconstruction, atlas_coreg_step, atlas_correct_step, atlasing_step, leakage_correction]
     
-    sm = StateMachine(["filtering", "ICA", "source setup", "bem_mesh", "coreg", "fwd", "source rec", "atlasing", "source ortho"])
+    sm = StateMachine(["filtering", "ICA", "source setup", "bem_mesh", "coreg", "fwd", "source rec", "atlas_coreg", "atlas_correct", "atlasing", "source ortho"], funs)
     
+    fargs = [ {'raw_path':raw_path, 'overwrite':overwrite}, 
+             {'raw_path':raw_path, 'overwrite':overwrite}, 
+             {'subject_name': subject_name, 'subjects_mri_dir':subjects_mri_dir, 'overwrite':overwrite}, 
+             {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name,'overwrite':overwrite}, 
+             {'subject_name': subject_name, 'subjects_mri_dir': subjects_mri_dir, 'raw_path': raw_path}, 
+             {'subjects_fif_dir': subjects_fif_dir, 'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'raw_path': raw_path,'overwrite':overwrite}, 
+             {'raw_path': raw_path, 'subject_name': subject_name, 'subjects_fif_dir': subjects_fif_dir, 'overwrite': overwrite},
+             {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'atlas_t1_ref': atlas_t1_ref, 'atlas_thresholded': atlas_thresholded, 'hcp_atlas_path': hcp_atlas_path}, 
+             {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name},
+             {'subjects_mri_dir': subjects_mri_dir, 'subjects_fif_dir': subjects_fif_dir, 'subject_name': subject_name, 't1_ref': atlas_t1_ref, 'atlas_path': atlas_thresholded}, 
+             {'subject_name': subject_name, 'subjects_fif_dir': subjects_fif_dir} ]
+        
+    sm.runSMandFunctions(fargs, skip_steps)
+    """
     curr_step = sm.getStateName()
     if noskip_step("filtering", curr_step, skip_steps):
         filtering_wrapped = step_wrapper("filtering", filtering_step)
@@ -244,6 +290,18 @@ def preprocess_fif(subject_name, subjects_fif_dir, subjects_mri_dir, atlas_t1_re
         print_success()
     
     curr_step = sm.transition()
+    if noskip_step("atlas_coreg",curr_step,skip_steps):
+        atlas_coreg_wp = step_wrapper("atlas coreg", atlas_coreg_step)
+        atlas_coreg_wp(subjects_mri_dir, subject_name, atlas_t1_ref, atlas_thresholded, hcp_atlas_path)
+        print_success()
+    curr_step = sm.transition()
+    
+    if noskip_step("atlas_correct",curr_step,skip_steps):
+        atlas_cor_wp = step_wrapper("atlas correction", atlas_correct_step)
+        atlas_cor_wp(subjects_mri_dir, subject_name)
+        print_success()
+    curr_step = sm.transition()
+    
     if noskip_step("atlasing", curr_step, skip_steps):
         # Let's do atlasing
         atlas_wp = step_wrapper("atlasing", atlasing_step)
@@ -253,6 +311,6 @@ def preprocess_fif(subject_name, subjects_fif_dir, subjects_mri_dir, atlas_t1_re
     if noskip_step("source ortho", curr_step, skip_steps):
         leakage_wp = step_wrapper("Source orthogonolization", leakage_correction)
         leakage_wp(subject_name, subjects_fif_dir)
-        print_success()
+        print_success()"""
     print("Done with computations.")
         
