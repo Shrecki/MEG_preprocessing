@@ -71,7 +71,7 @@ def extract_intercept_coeffs(coeffs):
             fitted_state_courses[i,t, :] = beta.flatten()
     return fitted_state_courses
 
-def run_two_level_glm(subjects_filtered, subjects_fif_dir, predicted_probas, cum_lengths, conditions, tmin, tmax, baseline):
+def run_two_level_glm(subjects_filtered, subjects_fif_dir, predicted_probas, cum_lengths, conditions, tmin, tmax, baseline, n_lags=None):
     # For each subject, store N_channels x N_times coefficients
     n_regressors = len(conditions) + 1
     n_subjects = len(subjects_filtered)
@@ -83,6 +83,9 @@ def run_two_level_glm(subjects_filtered, subjects_fif_dir, predicted_probas, cum
 
     for i, s in enumerate(subjects_filtered):
         data_subject = mne.io.read_raw(get_icaed_annotated_fname(get_subject_raw_path(subjects_fif_dir, s)))
+        if n_lags is not None:
+            times = data_subject.times
+            data_subject.crop(tmin=times[n_lags],tmax=times[-n_lags-1])
         events, events_dict = get_events_from_annotated_raw(data_subject)
         raw_i = create_raw_states_data(predicted_probas[cum_lengths[i]:cum_lengths[i+1],:], data_subject)
         # First level

@@ -9,7 +9,14 @@ with Bar("Processing...") as bar:
         p = os.path.join(subjects_fif_dir, e)
         if os.path.exists(p) and not os.path.exists(os.path.join(subjects_mri_dir, e, "surf", "rh.pial")):
             cmd = "recon-all -sd {} -subjid {} -i {} -all".format(subjects_mri_dir, e, os.path.join(p, "MEG_" + e + "_MRI_T1.nii"))
-            os.system(cmd)
+            try:
+                os.system(cmd)
+            except RuntimError as e:
+                e_text = str(e)
+                if "Use the --overwrite option" in e_text:
+                    print("File already exists.")
+                else:
+                    raise e
             bar.next()
             
 with Bar("Processing...") as bar:
@@ -17,5 +24,12 @@ with Bar("Processing...") as bar:
         p = os.path.join(subjects_fif_dir, e)
         if os.path.exists(p) and os.path.exists(os.path.join(subjects_mri_dir, e, "surf", "rh.pial")):
             cmd = "mne watershed_bem -d {} -s {}".format(subjects_mri_dir, e)
-            os.system(cmd)
+            try:
+                os.system(cmd)
+            except RuntimeError as e:
+                e_text = str(e)
+                if "Use the --overwrite option" in e_text:
+                    print("File already exists.")
+                else:
+                    raise e
             bar.next()
