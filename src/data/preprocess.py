@@ -148,7 +148,7 @@ def annotate_from_ica_downsample_and_save(raw_path, downsample_freq, overwrite):
     raw_post_processed_meg.save(get_icaed_annotated_fname(raw_path), overwrite=overwrite)
     return raw_post_processed_meg, downsample_factor
 
-def get_raw_and_covars(raw_path, overwrite):
+def covar_step(raw_path, overwrite):
     # Downsample to 250 Hz!
     downsample_freq= 250
     raw_post_processed_meg, downsample_factor = annotate_from_ica_downsample_and_save(raw_path, downsample_freq, overwrite)
@@ -160,7 +160,17 @@ def get_raw_and_covars(raw_path, overwrite):
     
     # Compute covariances
     data_cov, noise_cov, noise_rank = compute_covariances_from_events_pauses(raw_post_processed_meg, events_task, downsample_factor)
-    return raw_post_processed_meg, data_cov, noise_cov, noise_rank
+    
+    # Save covars
+    data_cov.save(raw_path.replace(".fif", "-data-cov.fif"), overwrite=overwrite)
+    noise_cov.save(raw_path.replace(".fif", "-data-cov.fif"), overwrite=overwrite)
+
+def get_raw_and_covars(raw_path, overwrite):
+    raw = mne.io.read_raw(raw_path.replace(".fif", "_filtered_icaed_annotated.fif"))
+    data_cov = mne.read_cov(raw_path.replace(".fif", "-data-cov.fif"))
+    noise_cov = mne.read_cov(raw_path.replace(".fif", "-data-cov.fif"))
+    noise_rank = "info"
+    return raw, data_cov, noise_cov, noise_rank
 
 
 def perform_source_reconstruction(raw_path, subject_name, subjects_fif_dir, overwrite=True):
@@ -225,20 +235,21 @@ def preprocess_fif(subject_name, subjects_fif_dir, subjects_mri_dir, atlas_t1_re
     print(subject_name)
     print(subjects_mri_dir)
     
-    raw_path = Path(subjects_fif_dir, subject_name, "nBack_tsss_mc.fif")
+    raw_path = str(Path(subjects_fif_dir, subject_name, "nBack_tsss_mc.fif"))
 
-    funs = [filtering_step, ica_step, source_setup_step, bem_mesh_step, manual_coreg_step, fwd_step, perform_source_reconstruction, atlas_coreg_step, atlas_correct_step, atlasing_step, leakage_correction]
+    funs = [filtering_step, ica_step, source_setup_step, bem_mesh_step, manual_coreg_step, fwd_step, covar_step, perform_source_reconstruction, atlas_coreg_step, atlas_correct_step, atlasing_step, leakage_correction]
     
-    sm = StateMachine(["filtering", "ICA", "source setup", "bem_mesh", "coreg", "fwd", "source rec", "atlas_coreg", "atlas_correct", "atlasing", "source ortho"], funs)
+    sm = StateMachine(["filtering", "ICA", "source setup", "bem_mesh", "coreg", "fwd", "covar comp", "source rec", "atlas_coreg", "atlas_correct", "atlasing", "source ortho"], funs)
     
     fargs = [ {'raw_path':raw_path, 'overwrite':overwrite}, 
              {'raw_path':raw_path, 'overwrite':overwrite}, 
              {'subject_name': subject_name, 'subjects_mri_dir':subjects_mri_dir, 'overwrite':overwrite}, 
              {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name,'overwrite':overwrite}, 
              {'subject_name': subject_name, 'subjects_mri_dir': subjects_mri_dir, 'raw_path': raw_path}, 
-             {'subjects_fif_dir': subjects_fif_dir, 'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'raw_path': raw_path,'overwrite':overwrite}, 
+             {'subjects_fif_dir': subjects_fif_dir, 'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'raw_path': raw_path,'overwrite':overwrite},
+             {'raw_path': raw_path, 'overwrite':overwrite},
              {'raw_path': raw_path, 'subject_name': subject_name, 'subjects_fif_dir': subjects_fif_dir, 'overwrite': overwrite},
-             {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'atlas_t1_ref': atlas_t1_ref, 'atlas_thresholded': atlas_thresholded, 'hcp_atlas_path': hcp_atlas_path}, 
+             {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'atlas_t1_ref': atlas_t1_ref, 'atlas_thresholded': atlas_thresholded, 'hcp_atlas_path': hcp_atlas_path},
              {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name},
              {'subjects_mri_dir': subjects_mri_dir, 'subjects_fif_dir': subjects_fif_dir, 'subject_name': subject_name, 't1_ref': atlas_t1_ref, 'atlas_path': atlas_thresholded}, 
              {'subject_name': subject_name, 'subjects_fif_dir': subjects_fif_dir} ]
