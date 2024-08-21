@@ -163,12 +163,12 @@ def covar_step(raw_path, overwrite):
     
     # Save covars
     data_cov.save(raw_path.replace(".fif", "-data-cov.fif"), overwrite=overwrite)
-    noise_cov.save(raw_path.replace(".fif", "-data-cov.fif"), overwrite=overwrite)
+    noise_cov.save(raw_path.replace(".fif", "-noise-cov.fif"), overwrite=overwrite)
 
 def get_raw_and_covars(raw_path, overwrite):
     raw = mne.io.read_raw(raw_path.replace(".fif", "_filtered_icaed_annotated.fif"))
     data_cov = mne.read_cov(raw_path.replace(".fif", "-data-cov.fif"))
-    noise_cov = mne.read_cov(raw_path.replace(".fif", "-data-cov.fif"))
+    noise_cov = mne.read_cov(raw_path.replace(".fif", "-noise-cov.fif"))
     noise_rank = "info"
     return raw, data_cov, noise_cov, noise_rank
 
