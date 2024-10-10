@@ -221,6 +221,7 @@ def put_atlas_to_subject_space(subject, subjects_mri_dir, t1_ref, atlas_path, hc
     
 def create_atlas_dict(subjects_mri_dir, subject_name, atlas_path):
     # Careful to extract and convert back as int. Otherwise labels will be floats, which results in errors!
+    print("Using atlas: {}".format(atlas_path))
     atlas_vals = np.unique(nib.load(atlas_path).get_fdata())[1:].astype(np.uint8)
     region_dict = {}
     for i in range(38):

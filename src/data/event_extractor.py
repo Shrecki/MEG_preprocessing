@@ -80,8 +80,8 @@ def get_events_from_raw(raw_path, raw, stimulus_channel):
     
     # Create the event table with a MATLAB script written by Costners
     events_fname = str(raw_path).replace('.fif', '_events.tsv')
-    script_name = "/media/miplab-nas2/Data/guibert/nBack_complete/nBack_Share_HC/nBackTriggers_modif_Fab.m"
-    script_path = "/media/miplab-nas2/Data/guibert/nBack_complete/nBack_Share_HC"
+    script_name = "/media/RCPNAS/Data/guibert/nBack_complete/nBack_Share_HC/nBackTriggers_modif_Fab.m"
+    script_path = "/media/RCPNAS/Data/guibert/nBack_complete/nBack_Share_HC"
     cmd="matlab -nodisplay -nosplash -nodesktop -r \"cd {}; nBackTriggers_modif_Fab('{}', '{}', 'N'); exit\"".format(script_path, stim_fname, events_fname)
     os.system(cmd)
     # Get back the table
@@ -91,6 +91,17 @@ def get_events_from_raw(raw_path, raw, stimulus_channel):
     #os.remove(stim_fname)
     #os.remove(events_fname)
     return event_table
+
+def load_event_table_corrected(events_fname):
+    event_table = np.loadtxt(events_fname, delimiter=',')
+    event_dictionary={1:"0-back T", 2: "1-back T", 3: "2-back T", 4: "0-back D", 5: "1-back D", 6: "2-back D"}
+    events_annotated = [""]*event_table.shape[0]
+    for i in range(len(events_annotated)):
+        event_id = int(event_table[i,0])
+        suffix = "_C" if (event_id < 4 and event_table[i,4] > 0) or (event_id >= 4 and event_table[i,4] == 0) else "_W"
+        events_annotated[i] = event_dictionary[event_id] + suffix
+    return events_annotated, event_table
+
 
 def convert_event_table_to_annots(event_table, orig_time, first_samp):
     event_dictionary={1:"0-back T", 2: "1-back T", 3: "2-back T", 4: "0-back D", 5: "1-back D", 6: "2-back D"}
@@ -106,7 +117,7 @@ def convert_event_table_to_annots(event_table, orig_time, first_samp):
 
 
 def get_annotations_from_raw(raw_path, raw, stimulus_channel, orig_time):
-    return convert_event_table_to_annots(get_events_from_raw(raw_path, raw, stimulus_channel), orig_time, raw.first_samp / 1000)
+    return convert_event_table_to_annots(get_events_from_raw(raw_path, raw, stimulus_channel), orig_time, raw.first_time)
 
 def annotate_raw_with_events_from_table(raw_path, raw):
     # Ensures already existing annotations are not thrown away

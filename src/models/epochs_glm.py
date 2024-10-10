@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 from nilearn.glm.first_level import run_glm
+from mne.stats import linear_regression
 import mne
 from src.models.hmm_models import create_raw_states_data
 from src.data.fname_conventions import get_subject_raw_path, get_icaed_annotated_fname

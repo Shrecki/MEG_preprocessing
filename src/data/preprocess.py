@@ -249,7 +249,7 @@ def preprocess_fif(subject_name, subjects_fif_dir, subjects_mri_dir, atlas_t1_re
              {'subjects_fif_dir': subjects_fif_dir, 'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'raw_path': raw_path,'overwrite':overwrite},
              {'raw_path': raw_path, 'overwrite':overwrite},
              {'raw_path': raw_path, 'subject_name': subject_name, 'subjects_fif_dir': subjects_fif_dir, 'overwrite': overwrite},
-             {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 'atlas_t1_ref': atlas_t1_ref, 'atlas_thresholded': atlas_thresholded, 'hcp_atlas_path': hcp_atlas_path},
+             {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name, 't1_ref': atlas_t1_ref, 'atlas_path': atlas_thresholded, 'hcp_path': hcp_atlas_path},
              {'subjects_mri_dir': subjects_mri_dir, 'subject_name': subject_name},
              {'subjects_mri_dir': subjects_mri_dir, 'subjects_fif_dir': subjects_fif_dir, 'subject_name': subject_name, 't1_ref': atlas_t1_ref, 'atlas_path': atlas_thresholded}, 
              {'subject_name': subject_name, 'subjects_fif_dir': subjects_fif_dir} ]
